@@ -539,3 +539,39 @@ func TestSchemaNumFields(t *testing.T) {
 	assert.Equal(t, 3, s.NumFields())
 	assert.Equal(t, s.NumFields(), s.NumFields())
 }
+
+func TestSchemaEqualWithMetadata(t *testing.T) {
+	fields := []Field{{Name: "f1", Type: PrimitiveTypes.Int32}}
+	md1 := NewMetadata([]string{"k"}, []string{"v1"})
+	md2 := NewMetadata([]string{"k"}, []string{"v2"})
+
+	a := NewSchema(fields, &md1)
+	b := NewSchema(fields, &md2)
+	c := NewSchema(fields, &md1)
+	d := NewSchema(fields, nil)
+
+	if !a.Equal(b) {
+		t.Fatalf("Equal should ignore schema metadata")
+	}
+	if a.EqualWithMetadata(b) {
+		t.Fatalf("EqualWithMetadata should detect differing schema metadata")
+	}
+	if !a.EqualWithMetadata(c) {
+		t.Fatalf("EqualWithMetadata should match identical metadata")
+	}
+	if a.EqualWithMetadata(d) {
+		t.Fatalf("EqualWithMetadata should detect missing metadata")
+	}
+	if !a.EqualWithMetadata(a) {
+		t.Fatalf("schema should equal itself")
+	}
+	var nilSchema *Schema
+	if a.EqualWithMetadata(nilSchema) {
+		t.Fatalf("non-nil schema should not equal nil")
+	}
+
+	other := NewSchema([]Field{{Name: "f2", Type: PrimitiveTypes.Int32}}, &md1)
+	if a.EqualWithMetadata(other) {
+		t.Fatalf("EqualWithMetadata should still compare fields")
+	}
+}

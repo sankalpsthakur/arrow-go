@@ -298,6 +298,19 @@ func (sc *Schema) Equal(o *Schema) bool {
 	return true
 }
 
+// EqualWithMetadata reports whether sc and o are equal, like Equal, and
+// additionally requires the schema-level metadata to be equal. Field-level
+// metadata is always compared by Field.Equal.
+func (sc *Schema) EqualWithMetadata(o *Schema) bool {
+	if !sc.Equal(o) {
+		return false
+	}
+	if sc == o {
+		return true
+	}
+	return sc.meta.Equal(o.meta)
+}
+
 // AddField adds a field at the given index and return a new schema.
 func (s *Schema) AddField(i int, field Field) (*Schema, error) {
 	if i < 0 || i > len(s.fields) {
