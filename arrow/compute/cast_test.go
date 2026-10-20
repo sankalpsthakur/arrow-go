@@ -466,6 +466,27 @@ func (c *CastSuite) TestNumericToBool() {
 	}
 }
 
+// cast_int16 was built from the int8 kernels, which gave wrong values for the bool and
+// decimal inputs because those kernels write their output using the element type.
+func (c *CastSuite) TestBoolAndDecimalToInt16() {
+	c.checkCast(arrow.FixedWidthTypes.Boolean, arrow.PrimitiveTypes.Int16,
+		`[true, false, true, true, false]`, `[1, 0, 1, 1, 0]`)
+	c.checkCast(arrow.FixedWidthTypes.Boolean, arrow.PrimitiveTypes.Int16,
+		`[true, null, false]`, `[1, null, 0]`)
+
+	for _, dt := range []arrow.DataType{
+		&arrow.Decimal128Type{Precision: 9, Scale: 2},
+		&arrow.Decimal256Type{Precision: 9, Scale: 2},
+	} {
+		// 300 and the int16 limits do not fit in an int8
+		c.checkCast(dt, arrow.PrimitiveTypes.Int16,
+			`["0.00", "1.00", "-1.00", "5.00", "300.00", "-32768.00", "32767.00", null]`,
+			`[0, 1, -1, 5, 300, -32768, 32767, null]`)
+		c.checkCastFails(dt, `["32768.00"]`, compute.SafeCastOptions(arrow.PrimitiveTypes.Int16))
+		c.checkCastFails(dt, `["-32769.00"]`, compute.SafeCastOptions(arrow.PrimitiveTypes.Int16))
+	}
+}
+
 func (c *CastSuite) TestNumericToBoolSIMDBoundaries() {
 	types := []arrow.DataType{
 		arrow.PrimitiveTypes.Int32,
