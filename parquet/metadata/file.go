@@ -160,7 +160,7 @@ func (f *FileMetaDataBuilder) Snapshot() (*FileMetaData, error) {
 		if !algo.Aad.SupplyAadPrefix {
 			signingAlgo.Aad.AadPrefix = algo.Aad.AadPrefix
 		}
-		signingAlgo.Algo = parquet.AesGcm
+		signingAlgo.Algo = algo.Algo
 		f.metadata.EncryptionAlgorithm = signingAlgo.ToThrift()
 		footerSigningMetadata := f.props.FileEncryptionProperties().FooterKeyMetadata()
 		if footerSigningMetadata != "" {

@@ -17,16 +17,19 @@
 package parquet_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -347,4 +350,50 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooterAesGcmCtr() {
 
 func TestFileEncryption(t *testing.T) {
 	suite.Run(t, new(EncryptionConfigTestSuite))
+}
+
+// In plaintext footer mode the column data is still encrypted with the configured
+// cipher, so the algorithm recorded in the plaintext footer has to be that cipher.
+// Readers use it to pick the cipher for the pages.
+func TestPlaintextFooterRecordsAesGcmCtr(t *testing.T) {
+	const colPath = "int_col"
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.MustPrimitive(schema.NewPrimitiveNode(colPath, parquet.Repetitions.Required, parquet.Types.Int32, -1, -1)),
+	}, -1))
+	encCols := parquet.ColumnPathToEncryptionPropsMap{
+		colPath: parquet.NewColumnEncryptionProperties(colPath, parquet.WithKey(ColumnEncryptionKey1), parquet.WithKeyID("kc1")),
+	}
+	encProps := parquet.NewFileEncryptionProperties(FooterEncryptionKey, parquet.WithFooterKeyMetadata("kf"),
+		parquet.WithPlaintextFooter(), parquet.WithAlg(parquet.AesCtr), parquet.WithEncryptedColumns(encCols))
+
+	var buf bytes.Buffer
+	writer := file.NewParquetWriter(&buf, root, file.WithWriterProps(parquet.NewWriterProperties(parquet.WithEncryptionProperties(encProps))))
+	rgw := writer.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1, 2, 3}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	decCols := parquet.ColumnPathToDecryptionPropsMap{
+		colPath: parquet.NewColumnDecryptionProperties(colPath, parquet.WithDecryptKey(ColumnEncryptionKey1)),
+	}
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(FooterEncryptionKey), parquet.WithColumnKeys(decCols))
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	require.Equal(t, parquet.AesCtr, rdr.MetaData().EncryptionAlgorithm().Algo)
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	vals := make([]int32, 3)
+	_, n, err := cr.(*file.Int32ColumnChunkReader).ReadBatch(3, vals, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cr.Err())
+	require.Equal(t, 3, n)
+	require.Equal(t, []int32{1, 2, 3}, vals)
 }
