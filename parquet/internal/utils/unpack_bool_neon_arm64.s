@@ -1,10 +1,16 @@
-//+build !noasm !appengine
+//go:build !noasm && !appengine
+// +build !noasm,!appengine
 
 // Optimized NEON bytes_to_bools: uses CMTST to extract 8 bits per byte
 // in parallel via SIMD, ~4x faster than the scalar original.
+//
+// Leaf with no stack frame so SIGPROF unwinding stays valid (GH-983).
+// Do not reintroduce WORD-encoded stp/ldp of x29/x30.
+
+#include "textflag.h"
 
 // func _bytes_to_bools_neon(in unsafe.Pointer, len int, out unsafe.Pointer, outlen int)
-TEXT ·_bytes_to_bools_neon(SB), $0-32
+TEXT ·_bytes_to_bools_neon(SB), NOSPLIT|NOFRAME, $0-32
 
     MOVD in+0(FP), R0
     MOVD len+8(FP), R1
