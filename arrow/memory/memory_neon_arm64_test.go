@@ -18,14 +18,10 @@
 package memory_test
 
 import (
-	"os"
-	"os/exec"
-	"runtime/pprof"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/testutils"
 )
 
 func TestNEONAssemblyTracebacks(t *testing.T) {
@@ -35,60 +31,13 @@ func TestNEONAssemblyTracebacks(t *testing.T) {
 	// running.
 
 	buf := make([]byte, 1<<20)
-	var traces []byte
-	duration := time.Second
-	d := t.TempDir()
-	for range 5 {
-		f, err := os.CreateTemp(d, "cpu.prof")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := pprof.StartCPUProfile(f); err != nil {
-			f.Close()
-			t.Skipf("CPU profiling is already enabled: %v", err)
-		}
-
-		deadline := time.Now().Add(duration)
-		for time.Now().Before(deadline) {
-			memory.Set(buf, 0x1f)
-		}
-		pprof.StopCPUProfile()
-		if err := f.Close(); err != nil {
-			t.Fatal(err)
-		}
-
-		traces, err = exec.Command("go", "tool", "pprof", "-symbolize=none", "-traces", f.Name()).CombinedOutput()
-		if err != nil {
-			t.Fatalf("go tool pprof -traces: %v\n%s", err, traces)
-		}
-		if strings.Contains(string(traces), "memory._memset_neon") {
-			break
-		}
-		// Mitigate potential flakiness on CI runners
-		duration *= 2
-	}
-	if !strings.Contains(string(traces), "memory._memset_neon") {
-		t.Fatal("CPU profile contains no _memset_neon samples after 5 attempts")
-	}
-
-	want := strings.Join([]string{
+	traces := testutils.CPUProfileUntilSampled(t, "memory._memset_neon", func() {
+		memory.Set(buf, 0x1f)
+	})
+	testutils.AssertAssemblyTraceback(t, traces, "memory._memset_neon", []string{
 		"github.com/apache/arrow-go/v18/arrow/memory._memset_neon",
 		"github.com/apache/arrow-go/v18/arrow/memory.memory_memset_neon",
 		"github.com/apache/arrow-go/v18/arrow/memory.Set",
 		"github.com/apache/arrow-go/v18/arrow/memory_test.TestNEONAssemblyTracebacks",
-	}, "\n")
-
-	for trace := range strings.SplitSeq(string(traces), "-----------") {
-		if !strings.Contains(trace, "memory._memset_neon") {
-			continue
-		}
-
-		// pprof adds whitespace and marks inlined functions, neither of which is
-		// part of the call stack. Remove both before requiring adjacent frames.
-		trace = strings.ReplaceAll(trace, "(inline)", "")
-		trace = strings.Join(strings.Fields(trace), "\n")
-		if !strings.Contains(trace, want) {
-			t.Errorf("invalid _memset_neon traceback:\n%s", trace)
-		}
-	}
+	})
 }
